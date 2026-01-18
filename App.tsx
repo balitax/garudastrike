@@ -27,8 +27,6 @@ const App: React.FC = () => {
   const [health, setHealth] = useState(100);
   const [lastStats, setLastStats] = useState<GameStats | null>(null);
   const [debrief, setDebrief] = useState<string>("");
-  const [loadingDebrief, setLoadingDebrief] = useState(false);
-  const [apiKeySet, setApiKeySet] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [installPrompt, setInstallPrompt] = useState<any>(null);
   
@@ -37,12 +35,8 @@ const App: React.FC = () => {
     trailType: 'standard'
   });
 
-  // Check for API Key on mount and Load High Score
+  // Load High Score
   useEffect(() => {
-    if (process.env.API_KEY) {
-      setApiKeySet(true);
-    }
-    
     const storedHighScore = localStorage.getItem('garuda_highscore');
     if (storedHighScore) {
       setHighScore(parseInt(storedHighScore, 10));
@@ -52,9 +46,7 @@ const App: React.FC = () => {
   // Listen for PWA install prompt
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: any) => {
-      // Prevent the mini-infobar from appearing on mobile
       e.preventDefault();
-      // Stash the event so it can be triggered later.
       setInstallPrompt(e);
     };
 
@@ -74,17 +66,10 @@ const App: React.FC = () => {
 
   const handleInstallClick = () => {
     if (!installPrompt) return;
-    
-    // Show the install prompt
     installPrompt.prompt();
-    
-    // Wait for the user to respond to the prompt
     installPrompt.userChoice.then((choiceResult: any) => {
       if (choiceResult.outcome === 'accepted') {
-        console.log('User accepted the install prompt');
         setInstallPrompt(null);
-      } else {
-        console.log('User dismissed the install prompt');
       }
     });
   };
@@ -99,15 +84,9 @@ const App: React.FC = () => {
       localStorage.setItem('garuda_highscore', stats.score.toString());
     }
     
-    // Generate AI Debrief
-    if (apiKeySet) {
-      setLoadingDebrief(true);
-      const text = await generateMissionDebrief(stats);
-      setDebrief(text);
-      setLoadingDebrief(false);
-    } else {
-      setDebrief("AI Core Offline. Please configure API Key.");
-    }
+    // Get Static Debrief
+    const text = await generateMissionDebrief(stats);
+    setDebrief(text);
   };
 
   return (
@@ -323,18 +302,9 @@ const App: React.FC = () => {
                 COMMANDER'S LOG
               </div>
               
-              {loadingDebrief ? (
-                <div className="flex items-center justify-center space-x-2 py-2">
-                  <div className="w-2 h-2 bg-green-500 animate-bounce"></div>
-                  <div className="w-2 h-2 bg-green-500 animate-bounce delay-75"></div>
-                  <div className="w-2 h-2 bg-green-500 animate-bounce delay-150"></div>
-                  <span className="text-xs text-green-500 font-mono ml-2">DECRYPTING TRANSMISSION...</span>
-                </div>
-              ) : (
-                <p className="text-sm font-mono text-green-400 leading-relaxed italic">
-                  "{debrief}"
-                </p>
-              )}
+              <p className="text-sm font-mono text-green-400 leading-relaxed italic">
+                "{debrief}"
+              </p>
             </div>
 
             <button 
