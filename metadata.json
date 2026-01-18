@@ -1,0 +1,5 @@
+{
+  "name": "Garuda Strike",
+  "description": "A retro-style mobile space shooter with AI-powered mission reports using Gemini.",
+  "requestFramePermissions": []
+}
