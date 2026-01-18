@@ -1049,11 +1049,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
          ctx.fillText(`BOSS: ${Math.ceil(boss.hp)}`, width/2, barY + 14);
       }
 
-      // 1. Player Health Bar
+      // Calculate HUD positions
+      const missionBarW = Math.min(400, width - 40);
+      const missionBarH = 30;
+      const missionBarX = width/2 - missionBarW/2;
+      const missionBarY = height - 40; 
+
+      // 1. Player Health Bar - Moved to Bottom Stack
       const hpBarW = Math.min(200, width * 0.4);
       const hpBarH = 10;
       const hpBarX = width / 2 - hpBarW / 2;
-      const hpBarY = 60; // Moved down to avoid Score overlapping
+      const hpBarY = missionBarY - 18; // 8px gap above mission bar
       
       const p = playerRef.current;
       const hpPercent = Math.max(0, p.hp / p.maxHp);
@@ -1073,12 +1079,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
       ctx.fillText(`HP ${Math.ceil(p.hp)}%`, width / 2, hpBarY - 4);
 
 
-      // 2. Mission/Wave Bar
-      const missionBarW = Math.min(400, width - 40);
-      const missionBarH = 30;
-      const missionBarX = width/2 - missionBarW/2;
-      const missionBarY = height - 40; 
-      
+      // 2. Mission/Wave Bar - Bottom Center
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
       ctx.fillRect(missionBarX, missionBarY, missionBarW, missionBarH);
       ctx.strokeStyle = '#4ade80';
@@ -1116,13 +1117,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
          const textAlpha = 0.5 + Math.sin(frameCountRef.current * 0.1) * 0.5;
          ctx.fillStyle = `rgba(74, 222, 128, ${textAlpha})`;
          
-         // Fix: Responsive font size and split text to avoid overflow
-         const fontSize = Math.min(30, width / 15);
+         // Responsive font size and split text to avoid overflow
+         const fontSize = Math.min(24, width / 20); // Reduced sizing slightly
          ctx.font = `${fontSize}px "Press Start 2P"`;
          ctx.textAlign = 'center';
          
-         ctx.fillText("MISSION", width/2, height/2 - 10);
-         ctx.fillText("ACCOMPLISHED", width/2, height/2 + 30);
+         ctx.fillText("MISSION", width/2, height/2 - 5);
+         ctx.fillText("ACCOMPLISHED", width/2, height/2 + 25);
       }
     }
   };
