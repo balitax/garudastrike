@@ -27,14 +27,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
   const playerRef = useRef<Entity>({
     id: 'player',
     pos: { x: 0, y: 0 },
-    size: { x: 40, y: 40 },
+    size: { x: 40, y: 48 },
     velocity: { x: 0, y: 0 },
     color: playerConfig.color,
     hp: 100,
     maxHp: 100,
     type: 'player',
     weaponType: 'BLASTER',
-    scoreValue: 0
+    scoreValue: 0,
+    hitTimer: 0,
+    bankAngle: 0
   });
   
   const targetPosRef = useRef<Vector2D>({ x: 0, y: 0 });
@@ -73,37 +75,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
     }
   }, [playerConfig.color]);
 
-  // Init Stars with Parallax Layers
+  // Init Stars
   useEffect(() => {
     if (starsRef.current.length === 0) {
-      // Layer 1: Deep Space (Slow, Small, Dim)
-      for (let i = 0; i < 80; i++) {
+      for (let i = 0; i < 100; i++) {
         starsRef.current.push({
           x: Math.random(),
           y: Math.random(),
-          size: Math.random() * 1.5 + 0.5,
-          speed: Math.random() * 0.3 + 0.1,
-          brightness: Math.random() * 0.3 + 0.1
-        });
-      }
-      // Layer 2: Mid Range (Medium speed/size)
-      for (let i = 0; i < 40; i++) {
-        starsRef.current.push({
-          x: Math.random(),
-          y: Math.random(),
-          size: Math.random() * 1 + 1.5,
-          speed: Math.random() * 0.8 + 0.5,
-          brightness: Math.random() * 0.3 + 0.4
-        });
-      }
-      // Layer 3: Foreground (Fast, Large, Bright)
-      for (let i = 0; i < 20; i++) {
-        starsRef.current.push({
-          x: Math.random(),
-          y: Math.random(),
-          size: Math.random() * 1.5 + 2.5,
-          speed: Math.random() * 1.5 + 2.0,
-          brightness: Math.random() * 0.2 + 0.8
+          size: Math.random() * 2 + 0.5,
+          speed: Math.random() * 2 + 0.5,
+          brightness: Math.random()
         });
       }
     }
@@ -121,13 +102,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
     if (wave % BOSS_WAVE_INTERVAL === 0) {
       type = 'BOSS';
       target = 1;
-      description = 'DEFEAT DREADNOUGHT CLASS';
+      description = 'DEFEAT DREADNOUGHT';
     } else {
-      // Randomize between Elimination and Survival for non-boss waves
       const rand = Math.random();
       if (wave > 2 && rand > 0.6) {
         type = 'SURVIVAL';
-        // Survival time increases with wave
         target = 30 + (Math.min(wave, 10) * 2); // Seconds
         description = `SURVIVE ASSAULT: ${target}s`;
       }
@@ -137,7 +116,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
       type,
       description,
       targetValue: target,
-      currentValue: 0, // Kills for elim, Frames for survival
+      currentValue: 0,
       isComplete: false,
       timer: 0
     };
@@ -145,47 +124,48 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
 
   const spawnBoss = (width: number, wave: number) => {
     const hp = 500 + (wave * 150);
-    const size = { x: 100, y: 80 };
+    const size = { x: 120, y: 100 };
     
     enemiesRef.current.push({
       id: `boss-${wave}`,
-      pos: { x: width / 2 - size.x / 2, y: -150 }, // Start off screen
+      pos: { x: width / 2 - size.x / 2, y: -150 },
       size,
       velocity: { x: 0, y: 0 },
       hp,
       maxHp: hp,
       type: 'boss',
-      color: '#a855f7', // Purple
+      color: '#a855f7',
       scoreValue: 5000 * Math.ceil(wave / 5),
       phase: 1,
       attackTimer: 0,
-      moveTimer: 0
+      moveTimer: 0,
+      hitTimer: 0,
+      rotation: 0
     });
   };
 
   const spawnEnemy = (width: number) => {
     const typeRoll = Math.random();
     let type: Entity['type'] = 'enemy_basic';
-    let size = { x: 30, y: 30 };
+    let size = { x: 32, y: 32 };
     let hp = 1;
     let speed = 2;
-    let color = '#ef4444'; // red-500
+    let color = '#ef4444';
     let score = 100;
 
     if (typeRoll > 0.85) {
       type = 'enemy_fast';
-      size = { x: 20, y: 20 };
+      size = { x: 24, y: 28 };
       speed = 4;
       hp = 1;
-      color = '#f59e0b'; // amber-500
+      color = '#f59e0b';
       score = 200;
     } else if (statsRef.current.wave > 2 && typeRoll > 0.70) {
-      // Kamikaze: Spawns after wave 2
       type = 'enemy_kamikaze';
-      size = { x: 25, y: 25 };
-      speed = 2.5; // Starts slower, accelerates
+      size = { x: 28, y: 28 };
+      speed = 2.5;
       hp = 2;
-      color = '#f97316'; // Orange
+      color = '#f97316';
       score = 300;
     }
 
@@ -198,7 +178,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
       maxHp: hp,
       type,
       color,
-      scoreValue: score
+      scoreValue: score,
+      hitTimer: 0,
+      rotation: 0
     });
   };
 
@@ -237,13 +219,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
       id: Math.random().toString(),
       pos: { x, y },
       size: { x: 24, y: 24 },
-      velocity: { x: 0, y: 2 }, // Floats down
+      velocity: { x: 0, y: 2 },
       hp: 1,
       maxHp: 1,
       type: 'powerup',
       powerUpType: pType,
       color: color,
-      scoreValue: 0
+      scoreValue: 0,
+      rotation: 0
     });
   };
 
@@ -280,31 +263,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
     };
 
     if (type === 'BLASTER') {
-      // Small green burst
-      for(let i=0; i<5; i++) {
-        const angle = Math.PI + Math.random() * Math.PI; // Upward arc
-        const speed = Math.random() * 2 + 1;
-        addP(Math.cos(angle) * speed, Math.sin(angle) * speed, '#34d399', Math.random() * 2 + 1, 0.4);
+      for(let i=0; i<3; i++) {
+        const angle = Math.PI + Math.random() * Math.PI;
+        addP(Math.cos(angle) * 2, Math.sin(angle) * 2, '#34d399', 2, 0.3);
       }
     } else if (type === 'SPREAD') {
-      // Wide yellow cone
-      for(let i=0; i<10; i++) {
-        const angle = Math.PI * 1.2 + Math.random() * Math.PI * 0.6; // Mostly up
-        const speed = Math.random() * 4 + 2;
-        addP(Math.cos(angle) * speed, Math.sin(angle) * speed, '#eab308', Math.random() * 3 + 2, 0.3);
+      for(let i=0; i<5; i++) {
+        addP((Math.random()-0.5)*4, -Math.random()*4, '#eab308', 3, 0.3);
       }
-    } else if (type === 'RAPID') {
-      // Side ejecting sparks + forward flash
-      addP(Math.random() * 3 + 2, Math.random() * 2 - 1, 'rgba(200,200,255,0.8)', 2, 0.2); // Right
-      addP(-(Math.random() * 3 + 2), Math.random() * 2 - 1, 'rgba(200,200,255,0.8)', 2, 0.2); // Left
-      addP(0, -6, '#06b6d4', 5, 0.15); // Forward
-    } else if (type === 'PLASMA') {
-       // Implosion/Expansion purple
-       for(let i=0; i<12; i++) {
-         const angle = Math.random() * Math.PI * 2;
-         const speed = Math.random() * 1.5;
-         addP(Math.cos(angle) * speed, Math.sin(angle) * speed, '#d8b4fe', Math.random() * 4 + 2, 0.6);
-       }
     }
   };
 
@@ -312,60 +278,39 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
     const p = playerRef.current;
     if (p.hp <= 0) return;
 
-    const px = p.pos.x;
-    const py = p.pos.y;
-    const pw = p.size.x;
-    const ph = p.size.y;
-
-    // Throttle: only spawn every 2-3 frames
     if (frameCountRef.current % 3 !== 0) return;
 
-    if (playerConfig.trailType === 'plasma') {
-       // Cyan rings
-       particlesRef.current.push({
-         id: Math.random().toString(),
-         pos: { x: px + pw/2 + (Math.random() * 6 - 3), y: py + ph - 5 },
-         velocity: { x: (Math.random() - 0.5) * 0.5, y: Math.random() * 1 + 1 },
-         life: 0.7,
-         maxLife: 0.7,
-         color: '#22d3ee',
-         size: Math.random() * 4 + 2
-       });
-    } else if (playerConfig.trailType === 'turbo') {
-       // Dual jet streams
-       const offset = pw * 0.2;
-       [px + offset, px + pw - offset].forEach((cx, i) => {
-          particlesRef.current.push({
+    const engineLeftX = p.pos.x + p.size.x * 0.3;
+    const engineRightX = p.pos.x + p.size.x * 0.7;
+    const engineY = p.pos.y + p.size.y - 5;
+
+    const spawnAt = (x: number, y: number) => {
+        let color = '#3b82f6';
+        if (playerConfig.trailType === 'plasma') color = '#22d3ee';
+        if (playerConfig.trailType === 'turbo') color = '#fbbf24';
+        
+        particlesRef.current.push({
             id: Math.random().toString(),
-            pos: { x: cx - 2 + (Math.random() * 4 - 2), y: py + ph - 5 },
-            velocity: { x: 0, y: Math.random() * 3 + 2 },
-            life: 0.5,
-            maxLife: 0.5,
-            color: Math.random() > 0.5 ? '#ef4444' : '#ffffff',
+            pos: { x: x + (Math.random() * 4 - 2), y: y },
+            velocity: { x: (Math.random() - 0.5) * 0.5, y: Math.random() * 3 + 2 },
+            life: 0.6,
+            maxLife: 0.6,
+            color: color,
             size: Math.random() * 3 + 1
-          });
-       });
-    } else {
-       // Standard Ion Drive (Orange/Yellow)
-       particlesRef.current.push({
-         id: Math.random().toString(),
-         pos: { x: px + pw/2 - 2 + (Math.random() * 4 - 2), y: py + ph - 2 },
-         velocity: { x: (Math.random() - 0.5) * 0.5, y: Math.random() * 2 + 1 },
-         life: 0.6,
-         maxLife: 0.6,
-         color: Math.random() > 0.5 ? '#f97316' : '#facc15',
-         size: Math.random() * 4 + 2
-       });
-    }
+        });
+    };
+
+    spawnAt(engineLeftX, engineY);
+    spawnAt(engineRightX, engineY);
   };
 
   const fireWeapon = () => {
     const p = playerRef.current;
     const weapon = p.weaponType || 'BLASTER';
+    
     playShoot(weapon);
     statsRef.current.shotsFired++;
     
-    // Muzzle flash
     const noseX = p.pos.x + p.size.x / 2;
     const noseY = p.pos.y;
     spawnMuzzleFlash(noseX, noseY, weapon);
@@ -373,7 +318,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
     const spawnBullet = (vx: number, vy: number, damage: number, size: number, color: string, type: WeaponType) => {
       projectilesRef.current.push({
         id: Math.random().toString(),
-        pos: { x: p.pos.x + p.size.x / 2 - size/2, y: p.pos.y },
+        pos: { x: noseX - size/2, y: noseY - size },
         velocity: { x: vx, y: vy },
         isPlayer: true,
         damage,
@@ -385,19 +330,19 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
 
     switch (weapon) {
       case 'SPREAD':
-        spawnBullet(0, -10, 1, 4, '#eab308', 'SPREAD');
-        spawnBullet(-3, -9, 1, 4, '#eab308', 'SPREAD');
-        spawnBullet(3, -9, 1, 4, '#eab308', 'SPREAD');
+        spawnBullet(0, -12, 1, 4, '#eab308', 'SPREAD');
+        spawnBullet(-3, -11, 1, 4, '#eab308', 'SPREAD');
+        spawnBullet(3, -11, 1, 4, '#eab308', 'SPREAD');
         break;
       case 'PLASMA':
-        spawnBullet(0, -15, 3, 6, '#a855f7', 'PLASMA');
+        spawnBullet(0, -16, 3, 8, '#a855f7', 'PLASMA');
         break;
       case 'RAPID':
-        spawnBullet(0, -12, 1, 3, '#06b6d4', 'RAPID');
+        spawnBullet(0, -14, 1, 3, '#06b6d4', 'RAPID');
         break;
       case 'BLASTER':
       default:
-        spawnBullet(0, -10, 1, 4, '#34d399', 'BLASTER');
+        spawnBullet(0, -14, 1, 4, '#34d399', 'BLASTER');
         break;
     }
   };
@@ -405,12 +350,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
   const spawnEnemyProjectile = (x: number, y: number, vx: number, vy: number, type: WeaponType) => {
       projectilesRef.current.push({
         id: Math.random().toString(),
-        pos: { x: x - 5, y: y }, // Center approx
+        pos: { x: x - 5, y: y }, 
         velocity: { x: vx, y: vy },
         isPlayer: false,
         damage: 15,
         color: '#ef4444',
-        size: 10,
+        size: 8,
         type: type
       });
   };
@@ -420,22 +365,20 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
     const height = canvas.height;
     frameCountRef.current++;
 
-    // Shake Decay
     if (shakeIntensityRef.current > 0) {
       shakeIntensityRef.current *= 0.9;
       if (shakeIntensityRef.current < 0.5) shakeIntensityRef.current = 0;
     }
 
-    // Combo Decay
     if (comboTimerRef.current > 0) {
       comboTimerRef.current--;
       if (comboTimerRef.current <= 0) {
-        statsRef.current.combo = 0; // Reset combo
+        statsRef.current.combo = 0;
         setCombo(0);
       }
     }
 
-    // Init Logic
+    // Initialize Game
     if (frameCountRef.current === 1) {
        playerRef.current.pos = { x: width / 2 - 20, y: height - 100 };
        targetPosRef.current = { x: width / 2, y: height - 100 };
@@ -448,10 +391,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
       p.pos.x = width / 2 - p.size.x / 2;
       p.pos.y = hoverY;
       
-      // Spawn trail particles in menu too for preview
       spawnTrailParticles();
       
-      // Update particles in menu
       particlesRef.current.forEach(part => {
         part.pos.x += part.velocity.x;
         part.pos.y += part.velocity.y;
@@ -463,36 +404,39 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
 
     if (gameState !== GameState.PLAYING) return;
     
-    // Wave Transition Delay
+    // Wave Transition
     if (statsRef.current.mission.isComplete) {
       waveTransitionTimer.current++;
-      
-      // Trigger transition sound on first frame of completion
       if (waveTransitionTimer.current === 1) {
         playWaveTransition();
       }
-
-      if (waveTransitionTimer.current > 120) { // 2 seconds delay
+      if (waveTransitionTimer.current > 120) {
         statsRef.current.wave++;
         initMission(statsRef.current.wave);
         waveTransitionTimer.current = 0;
-        // Clean up projectiles/enemies between waves
         projectilesRef.current = [];
         enemiesRef.current = [];
       }
-      return; // Pause game logic during transition
+      return;
     }
 
-    // Move Player (Lerp)
+    // Move Player
     const p = playerRef.current;
-    p.pos.x += (targetPosRef.current.x - p.size.x / 2 - p.pos.x) * PLAYER_SPEED_LERP;
+    const targetX = targetPosRef.current.x - p.size.x / 2;
+    const diffX = targetX - p.pos.x;
+    
+    const MAX_BANK = 0.4;
+    const targetBank = Math.max(-MAX_BANK, Math.min(MAX_BANK, diffX * 0.02));
+    p.bankAngle = (p.bankAngle || 0) + (targetBank - (p.bankAngle || 0)) * 0.1;
+    
+    p.pos.x += diffX * PLAYER_SPEED_LERP;
     p.pos.y += (targetPosRef.current.y - p.size.y - 20 - p.pos.y) * PLAYER_SPEED_LERP;
 
-    // Clamp Player
     p.pos.x = Math.max(0, Math.min(width - p.size.x, p.pos.x));
     p.pos.y = Math.max(0, Math.min(height - p.size.y, p.pos.y));
+    
+    if (p.hitTimer && p.hitTimer > 0) p.hitTimer--;
 
-    // Spawn Trail
     spawnTrailParticles();
 
     // Auto Shoot
@@ -504,35 +448,30 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
     // Mission Updates
     const mission = statsRef.current.mission;
     if (mission.type === 'SURVIVAL') {
-      mission.currentValue++; // Count frames
-      // Survival Complete
+      mission.currentValue++;
       if (mission.currentValue >= mission.targetValue * 60) {
         mission.isComplete = true;
-        playPowerUp(); // Success sound
+        playPowerUp();
       }
     } else if (mission.type === 'ELIMINATION') {
       if (mission.currentValue >= mission.targetValue) {
          mission.isComplete = true;
          playPowerUp();
       }
-    } else if (mission.type === 'BOSS') {
-      // Completed in collision logic when boss dies
     }
     
-    // Spawning Logic based on Mission
+    // Spawning Logic
     const currentWave = statsRef.current.wave;
     
     if (mission.type === 'BOSS') {
-      // Ensure boss exists
       const hasBoss = enemiesRef.current.some(e => e.type === 'boss');
       if (!hasBoss) {
         spawnBoss(width, currentWave);
       }
     } else {
-      // Standard or Survival
       let rate = ENEMY_SPAWN_RATE - Math.floor(statsRef.current.score / 500);
       if (mission.type === 'SURVIVAL') {
-        rate = Math.max(15, rate * 0.6); // 40% faster spawns in survival
+        rate = Math.max(15, rate * 0.6);
       } else {
         rate = Math.max(20, rate);
       }
@@ -542,30 +481,28 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
       }
     }
 
-    // Update Enemies (and Boss AI)
+    // Update Entities
     enemiesRef.current.forEach(e => {
+      if (e.hitTimer && e.hitTimer > 0) e.hitTimer--;
+      
       if (e.type === 'boss') {
-         // Boss AI
          e.moveTimer = (e.moveTimer || 0) + 1;
          e.attackTimer = (e.attackTimer || 0) + 1;
          
-         // 1. Movement
          if (e.pos.y < 80) {
            e.pos.y += 2;
-           e.pos.x += (width/2 - e.size.x/2 - e.pos.x) * 0.05; // Center X
+           e.pos.x += (width/2 - e.size.x/2 - e.pos.x) * 0.05;
          } else {
            const hoverX = (width/2 - e.size.x/2) + Math.sin(e.moveTimer * 0.02) * (width * 0.3);
            e.pos.x += (hoverX - e.pos.x) * 0.05;
          }
          
-         // 2. Phase Check
          if (e.hp < e.maxHp * 0.5) {
            e.phase = 2;
          } else {
            e.phase = 1;
          }
          
-         // 3. Attack
          const attackRate = e.phase === 2 ? 40 : 80;
          if (e.attackTimer > attackRate) {
            e.attackTimer = 0;
@@ -573,9 +510,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
            const cy = e.pos.y + e.size.y;
            
            if (e.phase === 1) {
-             spawnEnemyProjectile(cx, cy, 0, 5, 'ENEMY_PULSE');
-             spawnEnemyProjectile(cx, cy, -2, 4, 'ENEMY_PULSE');
-             spawnEnemyProjectile(cx, cy, 2, 4, 'ENEMY_PULSE');
+             spawnEnemyProjectile(cx - 30, cy - 20, 0, 5, 'ENEMY_PULSE');
+             spawnEnemyProjectile(cx + 30, cy - 20, 0, 5, 'ENEMY_PULSE');
              playShoot('SPREAD'); 
            } else {
              const dx = (p.pos.x + p.size.x/2) - cx;
@@ -592,7 +528,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
          }
          
       } else if (e.type === 'enemy_kamikaze') {
-        // Homing behavior
+        e.rotation = (e.rotation || 0) + 0.1;
         const centerX = e.pos.x + e.size.x/2;
         const centerY = e.pos.y + e.size.y/2;
         const targetX = p.pos.x + p.size.x/2;
@@ -603,11 +539,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
         const distance = Math.sqrt(dx*dx + dy*dy);
         
         if (distance > 0) {
-            // Accelerate towards player
             e.velocity.x += (dx / distance) * 0.1;
             e.velocity.y += (dy / distance) * 0.1;
-            
-            // Cap speed
             const maxSpeed = 5;
             const speed = Math.sqrt(e.velocity.x*e.velocity.x + e.velocity.y*e.velocity.y);
             if (speed > maxSpeed) {
@@ -615,31 +548,30 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
                 e.velocity.y = (e.velocity.y / speed) * maxSpeed;
             }
         }
-        
         e.pos.x += e.velocity.x;
         e.pos.y += e.velocity.y;
-        
-        // Face direction of movement (optional visual tweak, handled in draw)
       } else {
-        // Normal Enemy Movement
         e.pos.x += e.velocity.x;
         e.pos.y += e.velocity.y;
+        if (e.velocity.x !== 0) {
+             e.rotation = e.velocity.x * -0.1;
+        } else {
+            e.rotation = 0;
+        }
       }
     });
 
-    // Update Powerups
     powerupsRef.current.forEach(pu => {
       pu.pos.x += pu.velocity.x;
       pu.pos.y += pu.velocity.y;
+      pu.rotation = (pu.rotation || 0) + 0.05;
     });
 
-    // Update Projectiles
     projectilesRef.current.forEach(proj => {
       proj.pos.x += proj.velocity.x;
       proj.pos.y += proj.velocity.y;
     });
 
-    // Update Particles
     particlesRef.current.forEach(part => {
       part.pos.x += part.velocity.x;
       part.pos.y += part.velocity.y;
@@ -647,7 +579,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
     });
     particlesRef.current = particlesRef.current.filter(p => p.life > 0);
 
-    // Update Floating Texts
     floatingTextsRef.current.forEach(ft => {
       ft.pos.x += ft.velocity.x;
       ft.pos.y += ft.velocity.y;
@@ -655,8 +586,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
     });
     floatingTextsRef.current = floatingTextsRef.current.filter(ft => ft.life > 0);
 
-    // Collision Detection
-    // 1. Player Bullets hit Enemies
+    // Collisions
     projectilesRef.current.filter(proj => proj.isPlayer).forEach(proj => {
       const hitIdx = enemiesRef.current.findIndex(e => 
         proj.pos.x < e.pos.x + e.size.x &&
@@ -668,16 +598,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
       if (hitIdx !== -1) {
         const enemy = enemiesRef.current[hitIdx];
         enemy.hp -= proj.damage;
-        proj.damage = 0; // Destroy bullet
+        enemy.hitTimer = 5;
+        proj.damage = 0; 
         
         spawnExplosion(proj.pos.x, proj.pos.y, '#ffffff', 2);
 
         if (enemy.hp <= 0) {
           playExplosion(enemy.type === 'boss');
-          // Shake Effect
           addShake(enemy.type === 'boss' ? 20 : 5);
           
-          // COMBO LOGIC
           comboTimerRef.current = COMBO_TIMEOUT_FRAMES;
           statsRef.current.combo++;
           if (statsRef.current.combo > statsRef.current.maxCombo) {
@@ -685,7 +614,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
           }
           setCombo(statsRef.current.combo);
 
-          // Calculate Score with Combo Multiplier (10% bonus per combo count, max 3x)
           const multiplier = Math.min(3, 1 + (statsRef.current.combo * 0.1));
           const finalScore = Math.floor(enemy.scoreValue * multiplier);
 
@@ -694,22 +622,21 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
           setScore(statsRef.current.score);
           
           spawnExplosion(enemy.pos.x + enemy.size.x/2, enemy.pos.y + enemy.size.y/2, enemy.color, enemy.type === 'boss' ? 20 : 8);
-          spawnFloatingText(enemy.pos.x + enemy.size.x/2, enemy.pos.y, `+${finalScore}`, '#facc15'); // Yellow text
+          spawnFloatingText(enemy.pos.x + enemy.size.x/2, enemy.pos.y, `+${finalScore}`, '#facc15');
           
           if (statsRef.current.combo > 1) {
              spawnFloatingText(enemy.pos.x + enemy.size.x/2, enemy.pos.y - 15, `${statsRef.current.combo}x COMBO`, '#22d3ee');
           }
 
-          // Mission Logic: Elimination Kill
           if (mission.type === 'ELIMINATION' && !mission.isComplete) {
             mission.currentValue++;
           }
           
           if (enemy.type === 'boss') {
-            mission.isComplete = true; // Boss Mission Complete
+            mission.isComplete = true;
             playPowerUp();
             spawnPowerUp(enemy.pos.x + enemy.size.x/2 - 10, enemy.pos.y + enemy.size.y/2);
-             spawnPowerUp(enemy.pos.x + enemy.size.x/2 + 20, enemy.pos.y + enemy.size.y/2);
+            spawnPowerUp(enemy.pos.x + enemy.size.x/2 + 20, enemy.pos.y + enemy.size.y/2);
           } else if (Math.random() < 0.15) {
              spawnPowerUp(enemy.pos.x + enemy.size.x/2 - 10, enemy.pos.y + enemy.size.y/2);
           }
@@ -717,20 +644,20 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
       }
     });
     
-    // 2. Enemy Projectiles hit Player
     projectilesRef.current.filter(proj => !proj.isPlayer).forEach(proj => {
       if (p.pos.x < proj.pos.x + proj.size &&
           p.pos.x + p.size.x > proj.pos.x &&
           p.pos.y < proj.pos.y + proj.size &&
           p.pos.y + p.size.y > proj.pos.y) {
           
-        proj.damage = 0; // Destroy bullet
+        proj.damage = 0;
         p.hp -= 15;
-        p.weaponType = 'BLASTER'; // Downgrade weapon
+        p.hitTimer = 5;
+        p.weaponType = 'BLASTER';
         setHealth(p.hp);
         playExplosion();
-        addShake(10); // Shake on hit
-        statsRef.current.combo = 0; setCombo(0); // Lose combo
+        addShake(10);
+        statsRef.current.combo = 0; setCombo(0);
         spawnExplosion(p.pos.x + p.size.x/2, p.pos.y + p.size.y/2, '#ef4444', 5);
         
         if (p.hp <= 0) {
@@ -740,7 +667,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
       }
     });
 
-    // 3. Enemies collide with Player
     enemiesRef.current.forEach(e => {
       if (e.hp > 0 && 
           p.pos.x < e.pos.x + e.size.x &&
@@ -749,18 +675,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
           p.pos.y + p.size.y > e.pos.y) {
             
         p.hp -= 20;
+        p.hitTimer = 10;
         p.weaponType = 'BLASTER';
-        if (e.type !== 'boss') e.hp = 0; // Bosses don't die on ramming, just damage player
+        if (e.type !== 'boss') e.hp = 0;
         
-        // Elimination mission counts rams as kills? Maybe. Let's say yes for gameplay flow.
         if (e.type !== 'boss' && mission.type === 'ELIMINATION') {
            mission.currentValue++;
         }
         
         setHealth(p.hp);
         playExplosion();
-        addShake(15); // Big shake on collision
-        statsRef.current.combo = 0; setCombo(0); // Lose combo
+        addShake(15);
+        statsRef.current.combo = 0; setCombo(0);
         spawnExplosion(p.pos.x + p.size.x/2, p.pos.y + p.size.y/2, '#ef4444', 10);
         
         if (p.hp <= 0) {
@@ -770,14 +696,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
       }
     });
 
-    // 4. Powerups hit Player
     powerupsRef.current.forEach(pu => {
        if (p.pos.x < pu.pos.x + pu.size.x &&
            p.pos.x + p.size.x > pu.pos.x &&
            p.pos.y < pu.pos.y + pu.size.y &&
            p.pos.y + p.size.y > pu.pos.y) {
            
-           pu.hp = 0; // Mark for removal
+           pu.hp = 0;
 
            if (pu.powerUpType === 'HEALTH') {
               playPowerUp();
@@ -785,7 +710,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
               setHealth(p.hp);
            } else {
              playWeaponUp();
-             // Apply Weapon
              if (pu.powerUpType === 'WEAPON_SPREAD') p.weaponType = 'SPREAD';
              if (pu.powerUpType === 'WEAPON_RAPID') p.weaponType = 'RAPID';
              if (pu.powerUpType === 'WEAPON_PLASMA') p.weaponType = 'PLASMA';
@@ -796,7 +720,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
        }
     });
 
-    // Cleanup
     projectilesRef.current = projectilesRef.current.filter(p => 
       p.damage > 0 && p.pos.y > -50 && p.pos.y < height + 50
     );
@@ -804,21 +727,194 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
     powerupsRef.current = powerupsRef.current.filter(pu => pu.hp > 0 && pu.pos.y < height + 50);
   };
 
+  const drawGrid = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+    ctx.strokeStyle = 'rgba(6, 182, 212, 0.15)';
+    ctx.lineWidth = 1;
+
+    const offset = (frameCountRef.current * 2) % 40;
+    for (let y = offset; y < height; y += 40) {
+      ctx.globalAlpha = Math.max(0, (y / height) * 0.3);
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
+      ctx.stroke();
+    }
+
+    const centerX = width / 2;
+    const bottomSpacing = 80;
+    for (let x = -width; x < width * 2; x += bottomSpacing) {
+       ctx.globalAlpha = 0.15;
+       ctx.beginPath();
+       const vanishingPointX = centerX;
+       const vanishingPointY = -200;
+       
+       ctx.moveTo(vanishingPointX, vanishingPointY);
+       ctx.lineTo(x, height);
+       ctx.stroke();
+    }
+    ctx.globalAlpha = 1.0;
+  };
+
+  const drawPlayer = (ctx: CanvasRenderingContext2D, p: Entity) => {
+    const cx = p.pos.x + p.size.x / 2;
+    const cy = p.pos.y + p.size.y / 2;
+    
+    ctx.save();
+    ctx.translate(cx, cy);
+    if (p.bankAngle) ctx.rotate(p.bankAngle);
+    
+    if (p.hitTimer && p.hitTimer > 0) {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = '#ffffff';
+    } else {
+      ctx.fillStyle = p.color;
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 10;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(0, -p.size.y/2); 
+    ctx.lineTo(6, -p.size.y/4);
+    ctx.lineTo(8, p.size.y/4);
+    ctx.lineTo(p.size.x/2, p.size.y/3);
+    ctx.lineTo(p.size.x/2, p.size.y/2);
+    ctx.lineTo(8, p.size.y/3);
+    ctx.lineTo(4, p.size.y/2);
+    ctx.lineTo(-4, p.size.y/2);
+    ctx.lineTo(-8, p.size.y/3);
+    ctx.lineTo(-p.size.x/2, p.size.y/2);
+    ctx.lineTo(-p.size.x/2, p.size.y/3);
+    ctx.lineTo(-8, p.size.y/4);
+    ctx.lineTo(-6, -p.size.y/4);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = '#1e293b'; 
+    ctx.beginPath();
+    ctx.moveTo(0, -p.size.y/3);
+    ctx.lineTo(3, -5);
+    ctx.lineTo(0, 0);
+    ctx.lineTo(-3, -5);
+    ctx.fill();
+    
+    if (!p.hitTimer) {
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.8)';
+        ctx.beginPath();
+        ctx.rect(-6, p.size.y/2 - 2, 4, 8);
+        ctx.rect(2, p.size.y/2 - 2, 4, 8);
+        ctx.fill();
+    }
+
+    ctx.restore();
+  };
+
+  const drawEnemy = (ctx: CanvasRenderingContext2D, e: Entity) => {
+    const cx = e.pos.x + e.size.x / 2;
+    const cy = e.pos.y + e.size.y / 2;
+    
+    ctx.save();
+    ctx.translate(cx, cy);
+    if (e.rotation) ctx.rotate(e.rotation);
+
+    if (e.hitTimer && e.hitTimer > 0) {
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowBlur = 0;
+    } else {
+      ctx.fillStyle = e.color;
+      ctx.shadowColor = e.color;
+      ctx.shadowBlur = 5;
+    }
+
+    if (e.type === 'enemy_basic') {
+      ctx.fillRect(-e.size.x/2, -e.size.y/2, 6, e.size.y);
+      ctx.fillRect(e.size.x/2 - 6, -e.size.y/2, 6, e.size.y);
+      ctx.fillRect(-e.size.x/2, -4, e.size.x, 8);
+      ctx.fillStyle = '#111';
+      ctx.beginPath();
+      ctx.arc(0, 0, 8, 0, Math.PI*2);
+      ctx.fill();
+      ctx.strokeStyle = e.color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+    } else if (e.type === 'enemy_fast') {
+      ctx.beginPath();
+      ctx.moveTo(0, e.size.y/2);
+      ctx.lineTo(e.size.x/2, -e.size.y/2);
+      ctx.lineTo(0, -e.size.y/4);
+      ctx.lineTo(-e.size.x/2, -e.size.y/2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(-2, -e.size.y/2, 4, 6);
+
+    } else if (e.type === 'enemy_kamikaze') {
+      const spikes = 8;
+      ctx.beginPath();
+      for(let i=0; i<spikes * 2; i++) {
+        const r = i % 2 === 0 ? e.size.x/2 : e.size.x/4;
+        const a = (Math.PI * 2 * i) / (spikes * 2);
+        ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      const pulse = 4 + Math.sin(frameCountRef.current * 0.5) * 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, pulse, 0, Math.PI*2);
+      ctx.fill();
+
+    } else if (e.type === 'boss') {
+       ctx.beginPath();
+       ctx.moveTo(0, e.size.y/2);
+       ctx.lineTo(e.size.x/2, 0);
+       ctx.lineTo(e.size.x/3, -e.size.y/2);
+       ctx.lineTo(-e.size.x/3, -e.size.y/2);
+       ctx.lineTo(-e.size.x/2, 0);
+       ctx.closePath();
+       ctx.fill();
+       
+       const tAngle = Math.sin(frameCountRef.current * 0.05) * 0.5;
+       const drawTurret = (tx: number, ty: number) => {
+         ctx.save();
+         ctx.translate(tx, ty);
+         ctx.rotate(tAngle);
+         ctx.fillStyle = '#4c1d95';
+         ctx.fillRect(-4, 0, 8, 15);
+         ctx.beginPath();
+         ctx.arc(0, 0, 8, 0, Math.PI*2);
+         ctx.fill();
+         ctx.restore();
+       };
+       
+       drawTurret(-e.size.x/3, 0);
+       drawTurret(e.size.x/3, 0);
+
+       const coreColor = e.phase === 2 ? '#f472b6' : '#fff';
+       ctx.fillStyle = coreColor;
+       ctx.shadowColor = coreColor;
+       ctx.shadowBlur = 15;
+       ctx.beginPath();
+       ctx.arc(0, -10, 15, 0, Math.PI*2);
+       ctx.fill();
+    }
+    
+    ctx.restore();
+  };
+
   const draw = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-    // Clear
     ctx.fillStyle = '#050505';
     ctx.fillRect(0, 0, width, height);
 
     ctx.save();
     
-    // Apply Shake
     if (shakeIntensityRef.current > 0) {
       const dx = (Math.random() - 0.5) * shakeIntensityRef.current;
       const dy = (Math.random() - 0.5) * shakeIntensityRef.current;
       ctx.translate(dx, dy);
     }
 
-    // Draw Stars with Parallax
     ctx.fillStyle = '#ffffff';
     starsRef.current.forEach(star => {
       const twinkle = Math.sin((frameCountRef.current * 0.05) + (star.x * 20)) * 0.15;
@@ -829,22 +925,27 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
     });
     ctx.globalAlpha = 1.0;
 
-    // Draw Powerups
+    drawGrid(ctx, width, height);
+
     powerupsRef.current.forEach(pu => {
+        ctx.save();
+        ctx.translate(pu.pos.x + pu.size.x/2, pu.pos.y + pu.size.y/2);
+        if (pu.rotation) ctx.rotate(pu.rotation);
+        
         ctx.fillStyle = pu.color;
         ctx.shadowColor = pu.color;
         ctx.shadowBlur = 10;
-        const px = pu.pos.x;
-        const py = pu.pos.y;
         const s = pu.size.x;
 
         ctx.strokeStyle = pu.color;
         ctx.lineWidth = 2;
-        ctx.strokeRect(px, py, s, s);
+        ctx.strokeRect(-s/2, -s/2, s, s);
         ctx.globalAlpha = 0.3;
-        ctx.fillRect(px, py, s, s);
+        ctx.fillRect(-s/2, -s/2, s, s);
         ctx.globalAlpha = 1.0;
 
+        ctx.rotate(-pu.rotation!); 
+        
         ctx.fillStyle = '#fff';
         ctx.font = '16px "Press Start 2P"';
         ctx.textAlign = 'center';
@@ -853,239 +954,136 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
         if (pu.powerUpType === 'WEAPON_SPREAD') symbol = 'S';
         if (pu.powerUpType === 'WEAPON_RAPID') symbol = 'R';
         if (pu.powerUpType === 'WEAPON_PLASMA') symbol = 'P';
-        ctx.fillText(symbol, px + s/2, py + s/2 + 2);
-        ctx.shadowBlur = 0;
+        ctx.fillText(symbol, 0, 2);
+        
+        ctx.restore();
     });
 
-    // Draw Projectiles
     projectilesRef.current.forEach(p => {
       ctx.fillStyle = p.color;
-      ctx.shadowBlur = 5;
+      ctx.shadowBlur = 8;
       ctx.shadowColor = p.color;
       
       if (!p.isPlayer) {
-        // Enemy Projectile (Orbs/Beams)
         ctx.beginPath();
         ctx.arc(p.pos.x + p.size/2, p.pos.y + p.size/2, p.size/2, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 1;
-        ctx.stroke();
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(p.pos.x + p.size/2, p.pos.y + p.size/2, p.size/4, 0, Math.PI * 2);
+        ctx.fill();
       } else if (p.type === 'PLASMA') {
-        ctx.fillRect(p.pos.x, p.pos.y, p.size, p.size * 3);
+        ctx.beginPath();
+        ctx.ellipse(p.pos.x + p.size/2, p.pos.y + p.size/2, p.size/2, p.size * 1.5, 0, 0, Math.PI*2);
+        ctx.fill();
       } else if (p.type === 'SPREAD') {
         ctx.beginPath();
         ctx.arc(p.pos.x + p.size/2, p.pos.y + p.size/2, p.size/2, 0, Math.PI*2);
         ctx.fill();
       } else if (p.type === 'RAPID') {
-        ctx.fillRect(p.pos.x, p.pos.y, p.size, p.size * 2);
+        ctx.fillRect(p.pos.x, p.pos.y, p.size, p.size * 4);
       } else {
         ctx.beginPath();
-        ctx.ellipse(p.pos.x + 2, p.pos.y + 6, 2, 6, 0, 0, Math.PI * 2);
+        ctx.ellipse(p.pos.x + p.size/2, p.pos.y + p.size/2, p.size/2, p.size * 1.5, 0, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.shadowBlur = 0;
     });
 
-    // Draw Enemies & Boss
     enemiesRef.current.forEach(e => {
-      ctx.fillStyle = e.color;
-      ctx.shadowBlur = 5;
-      ctx.shadowColor = e.color;
-
-      const ex = e.pos.x;
-      const ey = e.pos.y;
-      const ew = e.size.x;
-      const eh = e.size.y;
-
-      if (e.type === 'enemy_basic') {
-        ctx.beginPath();
-        ctx.moveTo(ex + ew/2, ey + eh);
-        ctx.lineTo(ex + ew, ey); 
-        ctx.lineTo(ex + ew/2, ey + eh * 0.3);
-        ctx.lineTo(ex, ey);
-        ctx.closePath();
-        ctx.fill();
-        ctx.fillStyle = '#000';
-        ctx.beginPath();
-        ctx.arc(ex + ew/2, ey + eh * 0.4, 3, 0, Math.PI * 2);
-        ctx.fill();
-      } else if (e.type === 'enemy_fast') {
-        ctx.beginPath();
-        ctx.moveTo(ex + ew/2, ey + eh);
-        ctx.lineTo(ex + ew, ey);
-        ctx.lineTo(ex + ew/2, ey + eh * 0.2);
-        ctx.lineTo(ex, ey);
-        ctx.closePath();
-        ctx.fill();
-        ctx.fillStyle = 'rgba(255,255,255,0.4)';
-        ctx.beginPath();
-        ctx.moveTo(ex + ew/2, ey + eh);
-        ctx.lineTo(ex + ew/2 + 2, ey);
-        ctx.lineTo(ex + ew/2 - 2, ey);
-        ctx.fill();
-      } else if (e.type === 'enemy_kamikaze') {
-        // Triangle pointing towards velocity
-        ctx.save();
-        ctx.translate(ex + ew/2, ey + eh/2);
-        const angle = Math.atan2(e.velocity.y, e.velocity.x) - Math.PI/2;
-        ctx.rotate(angle);
-        ctx.beginPath();
-        ctx.moveTo(0, ew/2); // Nose
-        ctx.lineTo(-ew/2, -eh/2);
-        ctx.lineTo(0, -eh/4); // Indent
-        ctx.lineTo(ew/2, -eh/2);
-        ctx.closePath();
-        ctx.fill();
-        ctx.strokeStyle = '#fff';
-        ctx.stroke();
-        ctx.restore();
-      } else if (e.type === 'boss') {
-         // Massive Boss Sprite
-         ctx.fillStyle = e.phase === 2 ? '#d946ef' : e.color; // Flashier in phase 2
-         ctx.beginPath();
-         // Main Body (Hexagon-ish)
-         ctx.moveTo(ex + ew/2, ey + eh);
-         ctx.lineTo(ex + ew, ey + eh * 0.6);
-         ctx.lineTo(ex + ew, ey + eh * 0.2);
-         ctx.lineTo(ex + ew/2, ey);
-         ctx.lineTo(ex, ey + eh * 0.2);
-         ctx.lineTo(ex, ey + eh * 0.6);
-         ctx.closePath();
-         ctx.fill();
-         
-         // Cannons
-         ctx.fillStyle = '#581c87';
-         ctx.fillRect(ex - 10, ey + eh*0.4, 20, 30);
-         ctx.fillRect(ex + ew - 10, ey + eh*0.4, 20, 30);
-         
-         // Core
-         const coreColor = e.phase === 2 ? '#f472b6' : '#fff';
-         ctx.fillStyle = coreColor;
-         ctx.shadowColor = coreColor;
-         ctx.shadowBlur = 20;
-         ctx.beginPath();
-         ctx.arc(ex + ew/2, ey + eh/2, 12, 0, Math.PI * 2);
-         ctx.fill();
-         ctx.shadowBlur = 0;
-         
-         // Boss Health Bar
-         const barW = 300;
-         const barH = 20;
-         const barX = width/2 - barW/2;
-         const barY = 70; // Moved down to accommodate mission text
-         
-         ctx.fillStyle = 'rgba(0,0,0,0.5)';
-         ctx.fillRect(barX - 2, barY - 2, barW + 4, barH + 4);
-         ctx.fillStyle = '#ef4444';
-         ctx.fillRect(barX, barY, barW * (e.hp / e.maxHp), barH);
-         ctx.strokeStyle = '#fff';
-         ctx.lineWidth = 2;
-         ctx.strokeRect(barX, barY, barW, barH);
-         
-         ctx.fillStyle = '#fff';
-         ctx.textAlign = 'center';
-         ctx.font = '12px "Share Tech Mono"';
-         ctx.fillText(`DREADNOUGHT CLASS`, width/2, barY - 5);
-      }
-      ctx.shadowBlur = 0;
+        drawEnemy(ctx, e);
     });
 
-    // Draw Particles (Now includes Trails)
     ctx.globalCompositeOperation = 'screen';
     particlesRef.current.forEach(p => {
       ctx.fillStyle = p.color;
       ctx.globalAlpha = p.life;
       
       if (playerConfig.trailType === 'plasma' && p.life < 0.7 && p.size > 2) {
-          // Circular plasma particles
           ctx.beginPath();
           ctx.arc(p.pos.x, p.pos.y, p.size, 0, Math.PI*2);
           ctx.fill();
       } else {
-          // Standard rect particles
           ctx.fillRect(p.pos.x, p.pos.y, p.size, p.size);
       }
     });
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1.0;
 
-    // Draw Player
     if (playerRef.current.hp > 0 || gameState === GameState.CUSTOMIZE) {
-      const p = playerRef.current;
-      const px = p.pos.x;
-      const py = p.pos.y;
-      const pw = p.size.x;
-      const ph = p.size.y;
-      
-      ctx.fillStyle = p.color;
-      ctx.shadowBlur = 15;
-      ctx.shadowColor = p.color;
-      
-      ctx.beginPath();
-      ctx.moveTo(px + pw/2, py);
-      ctx.lineTo(px + pw * 0.65, py + ph * 0.6);
-      ctx.lineTo(px + pw, py + ph * 0.8);
-      ctx.lineTo(px + pw * 0.65, py + ph);
-      ctx.lineTo(px + pw * 0.55, py + ph * 0.9);
-      ctx.lineTo(px + pw * 0.45, py + ph * 0.9);
-      ctx.lineTo(px + pw * 0.35, py + ph);
-      ctx.lineTo(px, py + ph * 0.8);
-      ctx.lineTo(px + pw * 0.35, py + ph * 0.6);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-      ctx.beginPath();
-      ctx.moveTo(px + pw/2, py + ph * 0.2);
-      ctx.lineTo(px + pw * 0.55, py + ph * 0.4);
-      ctx.lineTo(px + pw * 0.45, py + ph * 0.4);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(px + pw * 0.65, py + ph * 0.6);
-      ctx.lineTo(px + pw, py + ph * 0.8);
-      ctx.moveTo(px + pw * 0.35, py + ph * 0.6);
-      ctx.lineTo(px, py + ph * 0.8);
-      ctx.stroke();
-      
-      if (p.weaponType === 'SPREAD') {
-        ctx.fillStyle = '#eab308';
-        ctx.fillRect(px, py + ph * 0.5, 4, 10);
-        ctx.fillRect(px + pw - 4, py + ph * 0.5, 4, 10);
-      } else if (p.weaponType === 'PLASMA') {
-        ctx.fillStyle = '#a855f7';
-        ctx.fillRect(px + pw/2 - 3, py + ph * 0.1, 6, 10);
-      }
-      
-      ctx.shadowBlur = 0;
+      drawPlayer(ctx, playerRef.current);
     }
 
-    // Draw Floating Texts
     floatingTextsRef.current.forEach(ft => {
       ctx.globalAlpha = ft.life;
       ctx.fillStyle = ft.color;
-      ctx.font = 'bold 16px "Share Tech Mono"'; // Using different font for clarity
+      ctx.font = 'bold 16px "Share Tech Mono"';
       ctx.textAlign = 'center';
       ctx.fillText(ft.text, ft.pos.x, ft.pos.y);
       ctx.globalAlpha = 1.0;
     });
 
-    ctx.restore(); // END Shake transform
+    ctx.restore();
 
-    // Draw HUD: Mission Status (Fixed position, does not shake)
     if (gameState === GameState.PLAYING) {
       const m = statsRef.current.mission;
       
-      // Background bar
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(width/2 - 150, 10, 300, 30);
-      ctx.strokeStyle = '#4ade80'; // green-400
+      const boss = enemiesRef.current.find(e => e.type === 'boss');
+      if (boss) {
+         const barW = Math.min(300, width - 40);
+         const barH = 20;
+         const barX = width/2 - barW/2;
+         const barY = 50; 
+         
+         ctx.fillStyle = 'rgba(0,0,0,0.5)';
+         ctx.fillRect(barX - 2, barY - 2, barW + 4, barH + 4);
+         ctx.fillStyle = '#ef4444';
+         ctx.fillRect(barX, barY, barW * (boss.hp / boss.maxHp), barH);
+         ctx.strokeStyle = '#fff';
+         ctx.lineWidth = 2;
+         ctx.strokeRect(barX, barY, barW, barH);
+         
+         ctx.fillStyle = '#fff';
+         ctx.textAlign = 'center';
+         ctx.font = '10px "Share Tech Mono"';
+         ctx.fillText(`BOSS: ${Math.ceil(boss.hp)}`, width/2, barY + 14);
+      }
+
+      // 1. Player Health Bar
+      const hpBarW = Math.min(200, width * 0.4);
+      const hpBarH = 10;
+      const hpBarX = width / 2 - hpBarW / 2;
+      const hpBarY = 15;
+      
+      const p = playerRef.current;
+      const hpPercent = Math.max(0, p.hp / p.maxHp);
+      
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.fillRect(hpBarX, hpBarY, hpBarW, hpBarH);
+      ctx.strokeStyle = '#374151'; 
       ctx.lineWidth = 1;
-      ctx.strokeRect(width/2 - 150, 10, 300, 30);
+      ctx.strokeRect(hpBarX, hpBarY, hpBarW, hpBarH);
+      
+      ctx.fillStyle = hpPercent > 0.5 ? '#22c55e' : (hpPercent > 0.25 ? '#eab308' : '#ef4444');
+      ctx.fillRect(hpBarX, hpBarY, hpBarW * hpPercent, hpBarH);
+      
+      ctx.fillStyle = '#9ca3af';
+      ctx.font = '10px "Share Tech Mono"';
+      ctx.textAlign = 'center';
+      ctx.fillText(`HP ${Math.ceil(p.hp)}%`, width / 2, hpBarY - 4);
+
+
+      // 2. Mission/Wave Bar
+      const missionBarW = Math.min(400, width - 40);
+      const missionBarH = 30;
+      const missionBarX = width/2 - missionBarW/2;
+      const missionBarY = height - 40; 
+      
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(missionBarX, missionBarY, missionBarW, missionBarH);
+      ctx.strokeStyle = '#4ade80';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(missionBarX, missionBarY, missionBarW, missionBarH);
       
       ctx.fillStyle = '#4ade80';
       ctx.font = '12px "Share Tech Mono"';
@@ -1097,28 +1095,24 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
       } else if (m.type === 'SURVIVAL') {
          const timeLeft = Math.max(0, Math.ceil(m.targetValue - m.currentValue / 60));
          statusText = `TIME REMAINING: ${timeLeft}s`;
-         // Danger color for survival
-         ctx.fillStyle = timeLeft < 10 ? '#ef4444' : '#4ade80';
+         if (timeLeft < 10) ctx.fillStyle = '#ef4444';
       } else if (m.type === 'BOSS') {
-         statusText = 'OBJECTIVE: DESTROY TARGET';
+         statusText = 'TARGET LOCKED';
          ctx.fillStyle = '#d946ef';
       }
       
-      ctx.fillText(`WAVE ${statsRef.current.wave} - ${statusText}`, width/2, 30);
+      ctx.fillText(`WAVE ${statsRef.current.wave} - ${statusText}`, width/2, missionBarY + 19);
       
-      // Mission Complete Overlay
       if (statsRef.current.mission.isComplete) {
          ctx.fillStyle = 'rgba(0,0,0,0.7)';
          ctx.fillRect(0, height/2 - 40, width, 80);
          
-         // Flash effect on transition start
          const flashAlpha = Math.max(0, 1 - waveTransitionTimer.current / 15);
          if (flashAlpha > 0) {
             ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha * 0.8})`;
             ctx.fillRect(0, 0, width, height);
          }
 
-         // Text Pulse
          const textAlpha = 0.5 + Math.sin(frameCountRef.current * 0.1) * 0.5;
          ctx.fillStyle = `rgba(74, 222, 128, ${textAlpha})`;
          ctx.font = '30px "Press Start 2P"';
@@ -1150,6 +1144,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
   const handleTouch = useCallback((e: React.TouchEvent | React.MouseEvent) => {
     if (gameState !== GameState.PLAYING) return;
     
+    // Crucial for mobile: prevent scrolling/zooming while playing
+    if (e.cancelable) {
+       e.preventDefault();
+    }
+    
     const canvas = canvasRef.current;
     if (!canvas) return;
     
@@ -1179,7 +1178,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
       particlesRef.current = [];
       powerupsRef.current = [];
       floatingTextsRef.current = [];
-      // Reset Stats and Mission
       statsRef.current = { 
         score: 0, 
         wave: 1, 
@@ -1214,7 +1212,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
   return (
     <canvas
       ref={canvasRef}
-      className="absolute top-0 left-0 w-full h-full block cursor-crosshair"
+      className="absolute top-0 left-0 w-full h-full block cursor-crosshair touch-none"
       onTouchMove={handleTouch}
       onTouchStart={handleTouch}
       onMouseMove={handleTouch}

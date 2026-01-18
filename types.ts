@@ -33,6 +33,10 @@ export interface Entity {
   powerUpType?: PowerUpType; // Only for type === 'powerup'
   weaponType?: WeaponType;   // Only for type === 'player'
   scoreValue: number;
+  // Visuals
+  hitTimer?: number; // For flashing white when hit
+  rotation?: number; // For rotating enemies
+  bankAngle?: number; // For player tilting
   // Boss specific
   phase?: number;
   attackTimer?: number;

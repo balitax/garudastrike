@@ -109,7 +109,7 @@ const App: React.FC = () => {
         <div className="absolute top-4 left-4 font-arcade text-green-400 z-10 pointer-events-none drop-shadow-md">
           <div>SCORE: {score.toString().padStart(6, '0')}</div>
           <div className="text-yellow-500 text-xs mt-1">HI: {Math.max(score, highScore).toString().padStart(6, '0')}</div>
-          <div className="mt-2 text-red-400">HP: {Math.max(0, health)}%</div>
+          {/* HP Moved to GameCanvas render */}
           
           {/* Combo Meter */}
           {combo > 1 && (
