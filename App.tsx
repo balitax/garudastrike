@@ -22,6 +22,8 @@ const TRAILS = [
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.MENU);
   const [score, setScore] = useState(0);
+  const [combo, setCombo] = useState(0);
+  const [highScore, setHighScore] = useState(0);
   const [health, setHealth] = useState(100);
   const [lastStats, setLastStats] = useState<GameStats | null>(null);
   const [debrief, setDebrief] = useState<string>("");
@@ -35,10 +37,15 @@ const App: React.FC = () => {
     trailType: 'standard'
   });
 
-  // Check for API Key on mount
+  // Check for API Key on mount and Load High Score
   useEffect(() => {
     if (process.env.API_KEY) {
       setApiKeySet(true);
+    }
+    
+    const storedHighScore = localStorage.getItem('garuda_highscore');
+    if (storedHighScore) {
+      setHighScore(parseInt(storedHighScore, 10));
     }
   }, []);
 
@@ -62,6 +69,7 @@ const App: React.FC = () => {
     initAudio(); // Unlock AudioContext on user interaction
     setGameState(GameState.PLAYING);
     setDebrief("");
+    setCombo(0);
   };
 
   const handleInstallClick = () => {
@@ -85,6 +93,12 @@ const App: React.FC = () => {
     setGameState(GameState.GAME_OVER);
     setLastStats(stats);
     
+    // Update High Score
+    if (stats.score > highScore) {
+      setHighScore(stats.score);
+      localStorage.setItem('garuda_highscore', stats.score.toString());
+    }
+    
     // Generate AI Debrief
     if (apiKeySet) {
       setLoadingDebrief(true);
@@ -105,15 +119,28 @@ const App: React.FC = () => {
         gameState={gameState} 
         onGameOver={handleGameOver}
         setScore={setScore}
+        setCombo={setCombo}
         setHealth={setHealth}
         playerConfig={playerConfig}
+        highScore={highScore}
       />
 
       {/* UI Overlay */}
       {(gameState === GameState.PLAYING || gameState === GameState.GAME_OVER) && (
         <div className="absolute top-4 left-4 font-arcade text-green-400 z-10 pointer-events-none drop-shadow-md">
           <div>SCORE: {score.toString().padStart(6, '0')}</div>
+          <div className="text-yellow-500 text-xs mt-1">HI: {Math.max(score, highScore).toString().padStart(6, '0')}</div>
           <div className="mt-2 text-red-400">HP: {Math.max(0, health)}%</div>
+          
+          {/* Combo Meter */}
+          {combo > 1 && (
+            <div className="mt-4 animate-pulse">
+              <div className="text-cyan-400 text-xl font-bold italic">COMBO x{combo}</div>
+              <div className="w-24 h-1 bg-gray-800 mt-1">
+                <div className="h-full bg-cyan-400 w-full animate-[ping_0.5s_ease-in-out]"></div> 
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -171,8 +198,12 @@ const App: React.FC = () => {
             <h1 className="text-4xl md:text-6xl font-arcade text-green-500 mb-2 tracking-tighter">
               GARUDA<br/>STRIKE
             </h1>
-            <p className="text-gray-400 mb-8 font-mono text-sm">DEFEND THE SKIES</p>
+            <p className="text-gray-400 mb-6 font-mono text-sm">DEFEND THE SKIES</p>
             
+            <div className="mb-6 p-2 bg-gray-900 border border-gray-700">
+               <span className="text-yellow-500 font-arcade text-sm">HI-SCORE: {highScore.toString().padStart(6, '0')}</span>
+            </div>
+
             <div className="space-y-4">
               <button 
                 onClick={handleStart}
@@ -274,11 +305,15 @@ const App: React.FC = () => {
           <div className="text-center p-6 border-4 border-red-500 shadow-[0_0_30px_rgba(239,68,68,0.6)] bg-black max-w-lg w-full mx-4">
             <h2 className="text-4xl font-arcade text-red-500 mb-4 animate-pulse">MISSION FAILED</h2>
             
+            {lastStats?.score && lastStats.score > highScore && (
+               <div className="mb-4 text-yellow-400 font-arcade animate-bounce">NEW HIGH SCORE!</div>
+            )}
+            
             <div className="grid grid-cols-2 gap-4 text-left mb-6 font-mono text-lg border p-4 border-gray-800">
               <div className="text-gray-400">FINAL SCORE</div>
               <div className="text-right text-yellow-400">{lastStats?.score}</div>
-              <div className="text-gray-400">WAVE REACHED</div>
-              <div className="text-right text-blue-400">{lastStats?.wave}</div>
+              <div className="text-gray-400">MAX COMBO</div>
+              <div className="text-right text-cyan-400">{lastStats?.maxCombo}</div>
               <div className="text-gray-400">ENEMIES DOWN</div>
               <div className="text-right text-green-400">{lastStats?.enemiesDestroyed}</div>
             </div>

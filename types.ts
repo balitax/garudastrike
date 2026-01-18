@@ -29,7 +29,7 @@ export interface Entity {
   color: string;
   hp: number;
   maxHp: number;
-  type: 'player' | 'enemy_basic' | 'enemy_fast' | 'boss' | 'powerup';
+  type: 'player' | 'enemy_basic' | 'enemy_fast' | 'enemy_kamikaze' | 'boss' | 'powerup';
   powerUpType?: PowerUpType; // Only for type === 'powerup'
   weaponType?: WeaponType;   // Only for type === 'player'
   scoreValue: number;
@@ -60,6 +60,16 @@ export interface Particle {
   size: number;
 }
 
+export interface FloatingText {
+  id: string;
+  text: string;
+  pos: Vector2D;
+  velocity: Vector2D;
+  life: number;
+  color: string;
+  size: number;
+}
+
 export interface MissionState {
   type: MissionType;
   description: string;
@@ -74,5 +84,7 @@ export interface GameStats {
   wave: number;
   enemiesDestroyed: number;
   shotsFired: number;
+  combo: number;
+  maxCombo: number;
   mission: MissionState;
 }

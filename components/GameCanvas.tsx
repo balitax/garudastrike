@@ -1,13 +1,15 @@
 import React, { useEffect, useRef, useCallback } from 'react';
-import { GameState, Entity, Projectile, Particle, GameStats, Vector2D, PlayerConfig, PowerUpType, WeaponType, MissionType } from '../types';
+import { GameState, Entity, Projectile, Particle, GameStats, Vector2D, PlayerConfig, PowerUpType, WeaponType, MissionType, FloatingText } from '../types';
 import { playShoot, playExplosion, playPowerUp, playWeaponUp, playGameOver, playWaveTransition } from '../utils/sound';
 
 interface GameCanvasProps {
   gameState: GameState;
   onGameOver: (stats: GameStats) => void;
   setScore: (score: number) => void;
+  setCombo: (combo: number) => void;
   setHealth: (hp: number) => void;
   playerConfig: PlayerConfig;
+  highScore?: number;
 }
 
 const PLAYER_SPEED_LERP = 0.15;
@@ -15,10 +17,11 @@ const BASE_SHOOT_COOLDOWN = 15; // Frames
 const RAPID_SHOOT_COOLDOWN = 8; // Frames
 const ENEMY_SPAWN_RATE = 60; // Frames
 const BOSS_WAVE_INTERVAL = 5; // Boss appears every 5 waves
+const COMBO_TIMEOUT_FRAMES = 120; // 2 seconds to keep combo
 
-export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, setScore, setHealth, playerConfig }) => {
+export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, setScore, setCombo, setHealth, playerConfig, highScore = 0 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const requestRef = useRef<number>();
+  const requestRef = useRef<number>(0);
   
   // Game State Refs (Mutable for performance)
   const playerRef = useRef<Entity>({
@@ -39,12 +42,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
   const powerupsRef = useRef<Entity[]>([]); 
   const projectilesRef = useRef<Projectile[]>([]);
   const particlesRef = useRef<Particle[]>([]);
+  const floatingTextsRef = useRef<FloatingText[]>([]);
   
   const statsRef = useRef<GameStats>({ 
     score: 0, 
     wave: 1, 
     enemiesDestroyed: 0, 
     shotsFired: 0,
+    combo: 0,
+    maxCombo: 0,
     mission: {
       type: 'ELIMINATION',
       description: 'INIT',
@@ -54,9 +60,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
     }
   });
   
+  const comboTimerRef = useRef(0);
   const frameCountRef = useRef(0);
   const starsRef = useRef<{x: number, y: number, size: number, speed: number, brightness: number}[]>([]);
   const waveTransitionTimer = useRef(0);
+  const shakeIntensityRef = useRef(0);
 
   // Update player color when config changes
   useEffect(() => {
@@ -100,6 +108,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
       }
     }
   }, []);
+
+  const addShake = (intensity: number) => {
+    shakeIntensityRef.current = Math.min(shakeIntensityRef.current + intensity, 30);
+  };
 
   const initMission = (wave: number) => {
     let type: MissionType = 'ELIMINATION';
@@ -160,13 +172,21 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
     let color = '#ef4444'; // red-500
     let score = 100;
 
-    if (typeRoll > 0.8) {
+    if (typeRoll > 0.85) {
       type = 'enemy_fast';
       size = { x: 20, y: 20 };
       speed = 4;
       hp = 1;
       color = '#f59e0b'; // amber-500
       score = 200;
+    } else if (statsRef.current.wave > 2 && typeRoll > 0.70) {
+      // Kamikaze: Spawns after wave 2
+      type = 'enemy_kamikaze';
+      size = { x: 25, y: 25 };
+      speed = 2.5; // Starts slower, accelerates
+      hp = 2;
+      color = '#f97316'; // Orange
+      score = 300;
     }
 
     enemiesRef.current.push({
@@ -179,6 +199,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
       type,
       color,
       scoreValue: score
+    });
+  };
+
+  const spawnFloatingText = (x: number, y: number, text: string, color: string = '#ffffff') => {
+    floatingTextsRef.current.push({
+      id: Math.random().toString(),
+      text,
+      pos: { x, y },
+      velocity: { x: 0, y: -1.5 },
+      life: 1.0,
+      color,
+      size: 14
     });
   };
 
@@ -388,6 +420,21 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
     const height = canvas.height;
     frameCountRef.current++;
 
+    // Shake Decay
+    if (shakeIntensityRef.current > 0) {
+      shakeIntensityRef.current *= 0.9;
+      if (shakeIntensityRef.current < 0.5) shakeIntensityRef.current = 0;
+    }
+
+    // Combo Decay
+    if (comboTimerRef.current > 0) {
+      comboTimerRef.current--;
+      if (comboTimerRef.current <= 0) {
+        statsRef.current.combo = 0; // Reset combo
+        setCombo(0);
+      }
+    }
+
     // Init Logic
     if (frameCountRef.current === 1) {
        playerRef.current.pos = { x: width / 2 - 20, y: height - 100 };
@@ -544,6 +591,35 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
            }
          }
          
+      } else if (e.type === 'enemy_kamikaze') {
+        // Homing behavior
+        const centerX = e.pos.x + e.size.x/2;
+        const centerY = e.pos.y + e.size.y/2;
+        const targetX = p.pos.x + p.size.x/2;
+        const targetY = p.pos.y + p.size.y/2;
+        
+        const dx = targetX - centerX;
+        const dy = targetY - centerY;
+        const distance = Math.sqrt(dx*dx + dy*dy);
+        
+        if (distance > 0) {
+            // Accelerate towards player
+            e.velocity.x += (dx / distance) * 0.1;
+            e.velocity.y += (dy / distance) * 0.1;
+            
+            // Cap speed
+            const maxSpeed = 5;
+            const speed = Math.sqrt(e.velocity.x*e.velocity.x + e.velocity.y*e.velocity.y);
+            if (speed > maxSpeed) {
+                e.velocity.x = (e.velocity.x / speed) * maxSpeed;
+                e.velocity.y = (e.velocity.y / speed) * maxSpeed;
+            }
+        }
+        
+        e.pos.x += e.velocity.x;
+        e.pos.y += e.velocity.y;
+        
+        // Face direction of movement (optional visual tweak, handled in draw)
       } else {
         // Normal Enemy Movement
         e.pos.x += e.velocity.x;
@@ -571,6 +647,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
     });
     particlesRef.current = particlesRef.current.filter(p => p.life > 0);
 
+    // Update Floating Texts
+    floatingTextsRef.current.forEach(ft => {
+      ft.pos.x += ft.velocity.x;
+      ft.pos.y += ft.velocity.y;
+      ft.life -= 0.02;
+    });
+    floatingTextsRef.current = floatingTextsRef.current.filter(ft => ft.life > 0);
+
     // Collision Detection
     // 1. Player Bullets hit Enemies
     projectilesRef.current.filter(proj => proj.isPlayer).forEach(proj => {
@@ -590,11 +674,32 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
 
         if (enemy.hp <= 0) {
           playExplosion(enemy.type === 'boss');
-          statsRef.current.score += enemy.scoreValue;
+          // Shake Effect
+          addShake(enemy.type === 'boss' ? 20 : 5);
+          
+          // COMBO LOGIC
+          comboTimerRef.current = COMBO_TIMEOUT_FRAMES;
+          statsRef.current.combo++;
+          if (statsRef.current.combo > statsRef.current.maxCombo) {
+             statsRef.current.maxCombo = statsRef.current.combo;
+          }
+          setCombo(statsRef.current.combo);
+
+          // Calculate Score with Combo Multiplier (10% bonus per combo count, max 3x)
+          const multiplier = Math.min(3, 1 + (statsRef.current.combo * 0.1));
+          const finalScore = Math.floor(enemy.scoreValue * multiplier);
+
+          statsRef.current.score += finalScore;
           statsRef.current.enemiesDestroyed++;
           setScore(statsRef.current.score);
-          spawnExplosion(enemy.pos.x + enemy.size.x/2, enemy.pos.y + enemy.size.y/2, enemy.color, enemy.type === 'boss' ? 20 : 8);
           
+          spawnExplosion(enemy.pos.x + enemy.size.x/2, enemy.pos.y + enemy.size.y/2, enemy.color, enemy.type === 'boss' ? 20 : 8);
+          spawnFloatingText(enemy.pos.x + enemy.size.x/2, enemy.pos.y, `+${finalScore}`, '#facc15'); // Yellow text
+          
+          if (statsRef.current.combo > 1) {
+             spawnFloatingText(enemy.pos.x + enemy.size.x/2, enemy.pos.y - 15, `${statsRef.current.combo}x COMBO`, '#22d3ee');
+          }
+
           // Mission Logic: Elimination Kill
           if (mission.type === 'ELIMINATION' && !mission.isComplete) {
             mission.currentValue++;
@@ -624,6 +729,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
         p.weaponType = 'BLASTER'; // Downgrade weapon
         setHealth(p.hp);
         playExplosion();
+        addShake(10); // Shake on hit
+        statsRef.current.combo = 0; setCombo(0); // Lose combo
         spawnExplosion(p.pos.x + p.size.x/2, p.pos.y + p.size.y/2, '#ef4444', 5);
         
         if (p.hp <= 0) {
@@ -644,6 +751,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
         p.hp -= 20;
         p.weaponType = 'BLASTER';
         if (e.type !== 'boss') e.hp = 0; // Bosses don't die on ramming, just damage player
+        
         // Elimination mission counts rams as kills? Maybe. Let's say yes for gameplay flow.
         if (e.type !== 'boss' && mission.type === 'ELIMINATION') {
            mission.currentValue++;
@@ -651,6 +759,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
         
         setHealth(p.hp);
         playExplosion();
+        addShake(15); // Big shake on collision
+        statsRef.current.combo = 0; setCombo(0); // Lose combo
         spawnExplosion(p.pos.x + p.size.x/2, p.pos.y + p.size.y/2, '#ef4444', 10);
         
         if (p.hp <= 0) {
@@ -682,6 +792,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
            }
            
            spawnExplosion(pu.pos.x + 12, pu.pos.y + 12, pu.color, 8);
+           spawnFloatingText(pu.pos.x, pu.pos.y, pu.powerUpType?.replace('WEAPON_', '') || 'HP', '#fff');
        }
     });
 
@@ -697,6 +808,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
     // Clear
     ctx.fillStyle = '#050505';
     ctx.fillRect(0, 0, width, height);
+
+    ctx.save();
+    
+    // Apply Shake
+    if (shakeIntensityRef.current > 0) {
+      const dx = (Math.random() - 0.5) * shakeIntensityRef.current;
+      const dy = (Math.random() - 0.5) * shakeIntensityRef.current;
+      ctx.translate(dx, dy);
+    }
 
     // Draw Stars with Parallax
     ctx.fillStyle = '#ffffff';
@@ -804,6 +924,22 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
         ctx.lineTo(ex + ew/2 + 2, ey);
         ctx.lineTo(ex + ew/2 - 2, ey);
         ctx.fill();
+      } else if (e.type === 'enemy_kamikaze') {
+        // Triangle pointing towards velocity
+        ctx.save();
+        ctx.translate(ex + ew/2, ey + eh/2);
+        const angle = Math.atan2(e.velocity.y, e.velocity.x) - Math.PI/2;
+        ctx.rotate(angle);
+        ctx.beginPath();
+        ctx.moveTo(0, ew/2); // Nose
+        ctx.lineTo(-ew/2, -eh/2);
+        ctx.lineTo(0, -eh/4); // Indent
+        ctx.lineTo(ew/2, -eh/2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.stroke();
+        ctx.restore();
       } else if (e.type === 'boss') {
          // Massive Boss Sprite
          ctx.fillStyle = e.phase === 2 ? '#d946ef' : e.color; // Flashier in phase 2
@@ -925,11 +1061,22 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
         ctx.fillRect(px + pw/2 - 3, py + ph * 0.1, 6, 10);
       }
       
-      // Removed old procedural trail drawing since we use particles now.
       ctx.shadowBlur = 0;
     }
 
-    // Draw HUD: Mission Status
+    // Draw Floating Texts
+    floatingTextsRef.current.forEach(ft => {
+      ctx.globalAlpha = ft.life;
+      ctx.fillStyle = ft.color;
+      ctx.font = 'bold 16px "Share Tech Mono"'; // Using different font for clarity
+      ctx.textAlign = 'center';
+      ctx.fillText(ft.text, ft.pos.x, ft.pos.y);
+      ctx.globalAlpha = 1.0;
+    });
+
+    ctx.restore(); // END Shake transform
+
+    // Draw HUD: Mission Status (Fixed position, does not shake)
     if (gameState === GameState.PLAYING) {
       const m = statsRef.current.mission;
       
@@ -997,7 +1144,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
 
   useEffect(() => {
     requestRef.current = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(requestRef.current!);
+    return () => cancelAnimationFrame(requestRef.current);
   }, [loop]);
 
   const handleTouch = useCallback((e: React.TouchEvent | React.MouseEvent) => {
@@ -1031,18 +1178,24 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
       projectilesRef.current = [];
       particlesRef.current = [];
       powerupsRef.current = [];
+      floatingTextsRef.current = [];
       // Reset Stats and Mission
       statsRef.current = { 
         score: 0, 
         wave: 1, 
         enemiesDestroyed: 0, 
         shotsFired: 0,
+        combo: 0,
+        maxCombo: 0,
         mission: { type: 'ELIMINATION', description: '', targetValue: 10, currentValue: 0, isComplete: false }
       };
       setScore(0);
+      setCombo(0);
       setHealth(100);
       frameCountRef.current = 0;
       waveTransitionTimer.current = 0;
+      shakeIntensityRef.current = 0;
+      comboTimerRef.current = 0;
     }
   }, [gameState]);
 
