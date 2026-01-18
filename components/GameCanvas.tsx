@@ -1053,7 +1053,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
       const hpBarW = Math.min(200, width * 0.4);
       const hpBarH = 10;
       const hpBarX = width / 2 - hpBarW / 2;
-      const hpBarY = 15;
+      const hpBarY = 60; // Moved down to avoid Score overlapping
       
       const p = playerRef.current;
       const hpPercent = Math.max(0, p.hp / p.maxHp);
@@ -1115,9 +1115,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, onGameOver, s
 
          const textAlpha = 0.5 + Math.sin(frameCountRef.current * 0.1) * 0.5;
          ctx.fillStyle = `rgba(74, 222, 128, ${textAlpha})`;
-         ctx.font = '30px "Press Start 2P"';
+         
+         // Fix: Responsive font size and split text to avoid overflow
+         const fontSize = Math.min(30, width / 15);
+         ctx.font = `${fontSize}px "Press Start 2P"`;
          ctx.textAlign = 'center';
-         ctx.fillText("MISSION ACCOMPLISHED", width/2, height/2 + 10);
+         
+         ctx.fillText("MISSION", width/2, height/2 - 10);
+         ctx.fillText("ACCOMPLISHED", width/2, height/2 + 30);
       }
     }
   };
